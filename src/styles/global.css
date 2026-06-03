@@ -122,8 +122,14 @@ section { padding: 96px 0; }
 /* ---------- 關於我 ---------- */
 .about p { color: var(--text-dim); font-size: 1.08rem; margin-bottom: 16px; max-width: 720px; }
 
-/* ---------- 技能標籤 ---------- */
-.skills { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+/* ---------- 技能（分類） ---------- */
+.skill-groups { display: flex; flex-direction: column; gap: 22px; margin-top: 32px; }
+.skill-group-title {
+  font-family: var(--mono); font-size: .9rem; font-weight: 700;
+  color: var(--accent); margin-bottom: 10px; letter-spacing: .02em;
+}
+.skill-group-title::before { content: '# '; color: var(--text-dim); }
+.skills { display: flex; flex-wrap: wrap; gap: 10px; }
 .skill-tag {
   font-family: var(--mono); font-size: .85rem;
   padding: 6px 14px; border-radius: 8px;
@@ -173,6 +179,27 @@ section { padding: 96px 0; }
   border: 1px solid var(--border);
 }
 .project-card .card-links { display: flex; gap: 16px; font-size: .9rem; font-weight: 500; }
+
+/* ---------- 競賽殊榮 ---------- */
+.awards-list { display: flex; flex-direction: column; gap: 18px; }
+.award-card {
+  display: flex; gap: 20px; align-items: flex-start;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 22px 24px;
+  transition: all .25s;
+}
+.award-card:hover {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 24px rgba(167, 139, 250, .15);
+}
+.award-period {
+  font-family: var(--mono); font-size: .85rem; font-weight: 700;
+  color: var(--accent-2); flex-shrink: 0; padding-top: 3px;
+}
+.award-card h3 { font-size: 1.08rem; line-height: 1.4; margin-bottom: 8px; }
+.award-card .award-topic { color: var(--text); font-size: .92rem; margin-bottom: 4px; }
+.award-card .award-desc { color: var(--text-dim); font-size: .92rem; }
+@media (max-width: 560px) { .award-card { flex-direction: column; gap: 8px; } }
 
 /* ---------- 頁尾 ---------- */
 footer {

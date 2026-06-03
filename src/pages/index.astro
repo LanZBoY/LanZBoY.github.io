@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { profile, socials, experiences, skills, projects } from '../data/site';
+import { profile, socials, experiences, skills, projects, awards } from '../data/site';
 
 const icons: Record<string, string> = {
   mail: '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>',
@@ -18,6 +18,7 @@ const icons: Record<string, string> = {
         <a href="#about">關於</a>
         <a href="#experience">經歷</a>
         <a href="#projects">作品</a>
+        <a href="#awards">殊榮</a>
         <a href="#contact">聯絡</a>
       </div>
     </div>
@@ -49,8 +50,15 @@ const icons: Record<string, string> = {
       <h2 class="section-title">關於我</h2>
       <p class="section-subtitle">About me</p>
       {profile.about.map((para) => <p>{para}</p>)}
-      <div class="skills">
-        {skills.map((skill) => <span class="skill-tag">{skill}</span>)}
+      <div class="skill-groups">
+        {skills.map((group) => (
+          <div class="skill-group">
+            <h3 class="skill-group-title">{group.category}</h3>
+            <div class="skills">
+              {group.items.map((skill) => <span class="skill-tag">{skill}</span>)}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   </section>
@@ -88,6 +96,26 @@ const icons: Record<string, string> = {
               {p.link && <a href={p.link} target="_blank" rel="noopener">前往網站 ↗</a>}
               {p.repo && <a href={p.repo} target="_blank" rel="noopener">原始碼 ↗</a>}
               {p.video && <a href={p.video} target="_blank" rel="noopener">Demo 影片 ↗</a>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- 競賽殊榮 -->
+  <section id="awards">
+    <div class="container">
+      <h2 class="section-title">競賽殊榮</h2>
+      <p class="section-subtitle">Honors &amp; Awards</p>
+      <div class="awards-list">
+        {awards.map((a) => (
+          <article class="award-card">
+            <span class="award-period">{a.period}</span>
+            <div>
+              <h3>{a.title}</h3>
+              <p class="award-topic">題目：{a.topic}</p>
+              <p class="award-desc">{a.description}</p>
             </div>
           </article>
         ))}

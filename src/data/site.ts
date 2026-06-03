@@ -10,8 +10,9 @@ export const profile = {
   tagline: '持續跳出舒適圈。',
   // 「關於我」段落（可以寫 2~4 句）
   about: [
-    '我是熱愛電腦科學的工程師，寫過很多程式 —— 從電腦視覺、訓練 AI，到網頁程式與各種腳本都有涉獵。',
-    '希望能成為默默貢獻世界的工程師（前提是不會餓死 😄）。',
+    '我是劉璿鈞，畢業於逢甲大學資訊工程研究所，擁有約 3 年的後端開發與系統架構經驗。擅長運用 Golang、Python 與 .NET 等多語言技術棧為企業打造高穩定的系統服務 —— 我不只是開發者，更是熱衷於把技術轉化為實際商業價值的問題解決者。',
+    '我具備良好的跨部門溝通能力，能把模糊的需求轉化為具體的技術方案。在台中榮總埔里分院服役期間，我主動發現行政流程的痛點，與醫護人員密切協作開發自動化工具，將原需 2 個月的評鑑作業縮短至 2 小時、效率提升 600 倍。',
+    '面對物聯網系統每日數萬筆資料的高併發挑戰，我導入 Python Asyncio 非同步架構並制定資料庫反正規化策略，讓系統處理效能提升 10 倍。我始終保持「用技術解決商業痛點」的動力，並持續精進高流量系統設計與雲端技術 —— 從單純的程式開發者，蛻變為具備全觀視角的架構設計者。',
   ],
   // 大頭貼路徑：把圖片放到 public/avatar.jpg，這裡就會自動顯示。
   // 不想放照片就設成 null。
@@ -51,12 +52,60 @@ export const experiences = [
   },
 ];
 
+// =====================================================================
+//  競賽殊榮 Honors & Awards
+// =====================================================================
+export const awards = [
+  {
+    period: '2023',
+    title: '2023 AI CUP 教育部全國人工智慧競賽 — 決賽前 10 名 (Top 10)',
+    topic: '隱私保護與醫學數據標準化 (Medical Data De-identification)',
+    description: '運用 NLP 技術精準識別並去除敏感個資，解決醫療數據隱私問題。',
+  },
+  {
+    period: '2023',
+    title: '2023 AI CUP 教育部全國人工智慧競賽 — 優異獎 (Top 25%)',
+    topic: '事實文字檢索與查核 (Fact Verification)',
+    description: '整合大型語言模型 (LLM) 與檢索技術 (RAG)，建置自動化資訊查核系統。',
+  },
+];
+
 // 技能標籤
 export const skills = [
-  'Python', 'Go', 'Java', 'ASP.NET',
-  'Docker', 'Kubernetes', 'AWS', 'EKS / AKS',
-  'CI/CD', 'Grafana', 'Prometheus', 'Loki', 'Tempo', 'OpenTelemetry',
-  'PostgreSQL', 'SQL Server', 'MongoDB', 'Redis',
+  {
+    category: 'Backend',
+    items: [
+      'Go (Gin)', 'Python (FastAPI)', 'C# / .NET Core',
+      'Java (Spring Boot)', 'Node.js (Express)',
+      'RESTful API', 'Asyncio / 並行控制',
+    ],
+  },
+  {
+    category: 'Cloud & DevOps',
+    items: [
+      'Docker', 'Kubernetes', 'GitHub Actions', 'Jenkins', 'ArgoCD (GitOps)',
+      'AWS', 'Azure (AKS)', 'TWS',
+    ],
+  },
+  {
+    category: 'Observability',
+    items: ['Grafana', 'Prometheus', 'Loki', 'Tempo', 'OpenTelemetry'],
+  },
+  {
+    category: 'Database',
+    items: ['PostgreSQL', 'SQL Server', 'MongoDB', 'Redis'],
+  },
+  {
+    category: 'AI & Data Science',
+    items: [
+      'PyTorch', 'TensorFlow / Keras', 'Pandas', 'Scikit-learn',
+      'NLP', 'LLM Fine-tuning', 'RAG',
+    ],
+  },
+  {
+    category: 'Frontend & Mobile',
+    items: ['JavaScript', 'React.js', 'HTML / CSS', 'Android (Java)', 'Unity'],
+  },
 ];
 
 // =====================================================================
