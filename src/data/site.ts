@@ -34,7 +34,7 @@ export const experiences = [
     role: 'SRE / Infra 工程師',
     company: '遊戲橘子數位科技',
     description:
-      '擔任 Infra / SRE，以 Terraform / Terragrunt (IaC) 管理 Kubernetes (EKS) 叢集與雲端資源，並建立共用基礎設施供團隊開發測試使用。負責自建可觀測性平台，整合 Grafana、Prometheus、Loki、Tempo 統一 Metrics / Logs / Traces 三大訊號並建置監控儀表板，並導入 OpenTelemetry 進行追蹤採樣與雲端觀測成本優化。',
+      '擔任 Infra / SRE，以 Terraform / Terragrunt (IaC) 管理 Kubernetes (EKS) 叢集與雲端資源，並建立共用基礎設施供團隊開發測試使用。負責自建可觀測性平台，整合 Grafana、Prometheus、Loki、Tempo 統一 Metrics / Logs / Traces 三大訊號並建置監控儀表板，並導入 OpenTelemetry 進行追蹤採樣與架構優化，將雲端觀測成本降低約 80%。',
   },
   {
     period: '2024/11 — 2026/2',
