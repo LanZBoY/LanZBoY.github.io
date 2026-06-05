@@ -1,0 +1,148 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const meta = notes.find((n) => n.slug === 'eks-adot-xray-tracing')!;
+---
+
+<Layout title={`${meta.title} · ${profile.name}`}>
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="note">
+    <div class="container">
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+      <p class="note-date">{meta.date}</p>
+      <h1>{meta.title}</h1>
+      <div class="tags">{meta.tags.map((t) => <span>{t}</span>)}</div>
+
+      <div class="prose">
+        <p>
+          專案原本<strong>沒有 trace</strong>。服務之間是一條呼叫鏈，但少了追蹤，
+          一旦鏈上某段出錯、或某次請求變慢，就只能各服務的 log 各看各的、靠猜的拼湊，
+          <strong>很難直接看清楚「錯在哪一段、慢在哪一段」</strong>。
+          解法是在 EKS 裡建一個 <strong>ADOT（AWS Distro for OpenTelemetry）collector</strong>，
+          跟 app 端工程師配合把資料收進來，送到 <strong>AWS X-Ray</strong>。
+        </p>
+
+        <h2>1. 資料流：trace 怎麼從 app 到 X-Ray</h2>
+        <div class="flow">
+          <div class="flow-node"><strong>應用服務</strong><small>OpenTelemetry SDK，產生 span / 傳遞 trace context</small></div>
+          <div class="flow-arrow"><span class="flow-label">OTLP（gRPC 4317 / HTTP 4318）送到 node-local collector</span></div>
+          <div class="flow-node flow-accent"><strong>ADOT Collector</strong><small>DaemonSet：otlp 收 → memory_limiter → batch</small></div>
+          <div class="flow-arrow"><span class="flow-label">awsxray exporter（IRSA 身份）</span></div>
+          <div class="flow-node flow-accent"><strong>AWS X-Ray</strong><small>service map／trace 時間軸</small></div>
+        </div>
+        <p>
+          落地方式是 <strong>ADOT Operator</strong>（用 EKS add-on 或 Helm 裝），再建一個
+          <code>OpenTelemetryCollector</code> 的 CRD 把 collector 跑成 <strong>DaemonSet</strong>。
+          app 端則由工程師用 OpenTelemetry SDK instrument、把 span 以 OTLP 送進來
+          —— 這塊是<strong>跨團隊配合</strong>：infra 把管子接好，app 把資料埋好、送對地方。
+        </p>
+
+        <h2>2. Collector pipeline：memory_limiter 與 batch（重點設定）</h2>
+        <p>
+          collector 的核心是一條 traces pipeline：<code>receivers → processors → exporters</code>。
+          最值得記的是兩個 processor，以及它們的<strong>順序</strong>：
+        </p>
+        <pre><code>{`receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  memory_limiter:          # ← 一定放第一個
+    check_interval: 1s
+    limit_mib: 400         # 要低於 container 的 memory limit
+    spike_limit_mib: 100
+  batch:                   # ← 放在 memory_limiter 之後
+    timeout: 5s
+    send_batch_size: 8192
+
+exporters:
+  awsxray:
+    region: us-west-2
+
+service:
+  pipelines:
+    traces:
+      receivers:  [otlp]
+      processors: [memory_limiter, batch]
+      exporters:  [awsxray]`}</code></pre>
+        <ul>
+          <li>
+            <strong><code>memory_limiter</code> —— 防止 collector 自己 OOM。</strong>
+            流量突然暴增時，它會在記憶體逼近上限時開始<strong>拒收 / 丟資料</strong>，保護 collector 不被打掛
+            （collector 一掛，全 node 的 trace 都斷）。<strong>一定要放 pipeline 第一個</strong>，
+            才能在資料進到後面 processor 前就先擋住；<code>limit_mib</code> 要設得比 container 的
+            <code>resources.limits.memory</code> 低，留 buffer。
+          </li>
+          <li>
+            <strong><code>batch</code> —— 把 span 批次後再送。</strong>
+            不要一條 span 就打一次 X-Ray API，<code>batch</code> 會累積到一定量 / 時間才整批送，
+            大幅降低對 X-Ray 的<strong>呼叫次數</strong>，避免 throttling、也比較省。
+            <strong>放在 <code>memory_limiter</code> 之後</strong>：先確保沒爆記憶體，再來談批次。
+          </li>
+        </ul>
+        <p>順序口訣：<strong>先保命（memory_limiter），再聚量（batch），最後送出（exporter）</strong>。順序顛倒會讓 memory_limiter 失去保護意義。</p>
+
+        <h2>3. 為什麼跑成 DaemonSet</h2>
+        <p>
+          collector 有幾種部署型態（sidecar / deployment gateway / daemonset）。這裡用 <strong>DaemonSet</strong>：
+          每個 node 一個 collector，該 node 上的 app 就近送到<strong>本機 node 的 collector</strong>，少一層跨節點網路、
+          也隨 node 數自動擴張。app 要拿到「本機 collector」的位址，常見做法是用 Downward API 把
+          <code>status.hostIP</code> 注入成環境變數，OTLP endpoint 指向 <code>$(HOST_IP):4317</code>。
+        </p>
+
+        <h2>4. IAM：讓 collector 能寫 X-Ray</h2>
+        <p>
+          collector 送資料到 X-Ray 需要權限，走 <strong>IRSA</strong>：collector 的 ServiceAccount 綁一個 IAM role，
+          policy 至少要有 <code>xray:PutTraceSegments</code> 與 <code>xray:PutTelemetryRecords</code>。
+          沒設好的話 exporter 會一直 4xx、trace 進不去。
+        </p>
+
+        <h2>5. 跟 app 端配合的部分</h2>
+        <ul>
+          <li><strong>instrument</strong>：app 端要掛 OpenTelemetry SDK（自動 instrumentation 或手動建 span），HTTP / gRPC / DB 等呼叫才會產生 span。</li>
+          <li><strong>context propagation</strong>：服務鏈要能串起來，靠的是把 trace context（W3C <code>traceparent</code> header）<strong>沿著呼叫往下傳</strong>。少了這步，每個服務的 span 會變成各自獨立、串不成一條完整 trace。</li>
+          <li><strong>送對 endpoint</strong>：app 的 OTLP exporter 指到 node-local collector，而不是直接打 X-Ray（直接打就少了 collector 的 batch / 緩衝 / 統一處理）。</li>
+        </ul>
+
+        <h2>6. 成效</h2>
+        <p>
+          接上 X-Ray 後，原本「看不清楚」的痛點就有解了：<strong>service map</strong> 直接畫出服務之間的呼叫關係與
+          每段的延遲 / 錯誤率，一眼看出鏈上哪個服務在噴錯、哪一跳是瓶頸；點進單一 trace 的時間軸，
+          還能看到一個請求在各服務、各 span 花了多少時間。從「各服務 log 各看各的」變成「一條 trace 從頭看到尾」。
+        </p>
+
+        <h2>小結</h2>
+        <p>
+          架構一句話：<strong>app（OTel SDK）→ OTLP → ADOT Collector（DaemonSet）→ X-Ray</strong>。
+          infra 這側最關鍵的兩個設定是 <code>memory_limiter</code>（保命、放第一個）和 <code>batch</code>（聚量、放其後）；
+          而要讓整條服務鏈真的串起來，<strong>app 端的 instrument 與 context propagation</strong> 缺一不可
+          —— 這是一件 infra 跟 app 必須一起做的事。
+        </p>
+      </div>
+
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+    </div>
+  </article>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

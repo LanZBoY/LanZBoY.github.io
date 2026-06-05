@@ -1,0 +1,139 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const meta = notes.find((n) => n.slug === 'terragrunt-central-infra-default-tags')!;
+---
+
+<Layout title={`${meta.title} · ${profile.name}`}>
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="note">
+    <div class="container">
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+      <p class="note-date">{meta.date}</p>
+      <h1>{meta.title}</h1>
+      <div class="tags">{meta.tags.map((t) => <span>{t}</span>)}</div>
+
+      <div class="prose">
+        <p>
+          這篇是一段<strong>持續在做</strong>的事，不是某個時間點的單一任務。起點是一個痛點，
+          後面慢慢長出集中管理專案、統一標籤、再到自己寫 Lambda 做盤點與用量監控。
+        </p>
+
+        <h2>1. 痛點：一個服務一個 Terragrunt，沒人管「零散資源」</h2>
+        <p>
+          當時的狀況是<strong>「一個服務 / 專案配一份 Terragrunt」</strong>，各自管自己的資源。
+          問題是：有一些 AWS 資源不屬於任何單一服務（共用的、手動開的、跨服務的），
+          <strong>沒有一個中央 infra 專案來收這些零散資源</strong>，於是它們就變成沒人用 IaC 管、漂在 console 上的孤兒。
+        </p>
+        <p>連帶的麻煩：</p>
+        <ul>
+          <li>不知道帳號裡到底有哪些資源、誰開的、屬於哪個專案 —— ownership 不清楚。</li>
+          <li>成本分不出來：沒有一致的 tag，cost allocation 報表根本切不開。</li>
+          <li>有人手動改了東西，沒有 IaC 對照，<strong>drift（漂移）也偵測不到</strong>。</li>
+        </ul>
+
+        <h2>2. 解法一：建立集中式 infra 管理專案</h2>
+        <p>
+          我另外建了一個<strong>集中式的 infra 管理專案</strong>（一份 Terragrunt 收那些零散、共用的 AWS 資源），
+          補上原本缺的那一塊，讓「不屬於任何服務」的資源也有家、也納入 IaC。搭配一條簡單的 CI/CD：
+        </p>
+        <ul>
+          <li><strong>CI</strong>：對<strong>有變動的 <code>*.hcl</code> 路徑</strong>跑 <code>terragrunt plan</code>，PR 上就能看到這次會動到什麼。</li>
+          <li><strong>CD</strong>：對變動路徑做<strong>手動觸發</strong>的 <code>terragrunt apply</code>（infra 變更不自動上，留一道人工關卡）。</li>
+        </ul>
+        <p>只 plan/apply「有改的路徑」很關鍵 —— 整個 repo <code>run-all</code> 又慢又危險，按 changed path 收斂範圍才安全。</p>
+
+        <h2>3. 解法二：用 provider default_tags 統一打標籤</h2>
+        <p>
+          有了集中管理還不夠，要能「看懂」資源得靠 tag。目標：讓<strong>所有</strong> AWS 資源都帶上一致的
+          default tag，方便 <strong>cost allocation</strong>（成本歸屬）、<strong>ownership 追蹤</strong>與資源歸屬。
+          做法是把 tag 收斂到 <strong>AWS provider 的 <code>default_tags</code></strong>，而不是每個模組各自帶一份 <code>tags</code> input：
+        </p>
+        <pre><code>{`# 統一在 provider 設 default_tags，個別模組不再各自帶 tags
+provider "aws" {
+  default_tags {
+    tags = {
+      ManagedBy   = "Terragrunt"   # 取代舊的、不一致的值
+      Owner       = "<team>"
+      Environment = var.env
+      Project     = var.project
+    }
+  }
+}`}</code></pre>
+        <p>同時把散在各模組（如 <code>live/&lt;env&gt;/kubernetes</code>）裡重複的 <code>tags = {'{ ... }'}</code> input 移除，改由 provider 一處統一處理，避免到處對不齊。</p>
+
+        <h3>分批 apply 策略（dev → uat → prod）</h3>
+        <p>因為動到的是「所有用 AWS provider 的資源」，一次全 apply 風險太高。改採每個環境分三個 batch、由低風險往高風險推：</p>
+        <table>
+          <thead><tr><th>Batch</th><th>內容</th><th>性質</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>IAM / SG / log group / S3 / ECR / ACM / ingress</td><td>Low risk，純加 tag</td></tr>
+            <tr><td>2</td><td>VPC / RDS / Redis / SQS</td><td>Stateful，謹慎</td></tr>
+            <tr><td>3</td><td>EKS（kubernetes / cluster autoscaler / addons）</td><td>會觸發 node rolling，手動控制</td></tr>
+          </tbody>
+        </table>
+        <p>
+          <strong>不要用 <code>terragrunt run-all apply</code></strong>：batch 之間有相依，且 EKS 的 rolling update 需要手動節奏控制，
+          一把梭很容易在 stateful / node 重啟那關出事。
+        </p>
+
+        <h3>踩坑：default_tags 不會注入 launch template</h3>
+        <p>
+          一個不直覺的雷：<strong><code>default_tags</code> 不會</strong>自動套進 EKS node 的 launch template
+          <code>tag_specifications</code>。也就是說，<strong>EC2 instance 本身</strong>的 tag（不是 EKS resource tag）
+          可能會少掉你以為一定會有的 key。移除舊的各模組 <code>tags</code> input 時，這幾種情境要先確認，否則會默默壞掉：
+        </p>
+        <ul>
+          <li>Cost allocation 報表如果依賴 <strong>EC2 instance tag</strong>（不是 resource tag）。</li>
+          <li>用 <code>boto3</code> / <code>aws cli --filters</code> 依 tag 篩 instance 的腳本。</li>
+          <li>IAM policy 裡的 <code>aws:ResourceTag/...</code> condition。</li>
+        </ul>
+        <p>所以 apply 前一定在 dev 先 <code>terragrunt plan</code>，確認 launch template <code>tag_specifications</code> 的 diff 符合預期再往上推。</p>
+
+        <h2>4. 解法三：寫 Lambda 做盤點與用量監控（持續做）</h2>
+        <p>
+          有了集中專案 + 一致的 tag，接下來想「主動看見」帳號的狀態，而不是出事才查。於是寫了 Lambda 腳本定期跑：
+        </p>
+        <ul>
+          <li><strong>盤點所有 AWS 資源、偵測變更</strong>：定期掃帳號裡的資源清單，比對前一次的快照，抓出新增 / 刪除 / 被手動改動的東西 —— 等於一個輕量的 <strong>drift / 變更偵測</strong>，補上 console 手動操作沒有 IaC 紀錄的盲區。</li>
+          <li><strong>EC2 用量</strong>：收 <code>CPUUtilization</code>、<code>NetworkIn</code> / <code>NetworkOut</code>，看哪些 instance 在忙、哪些其實閒置（可以縮）。</li>
+          <li><strong>S3 用量趨勢圖</strong>：把各 bucket 的用量畫成趨勢，一眼看出<strong>哪個 bucket 用量異常成長</strong>（通常是沒設 lifecycle 的 log / 暫存堆積），及早處理省成本。</li>
+        </ul>
+        <p>
+          這塊的價值是<strong>把「成本與資源狀態」變成可持續觀察的東西</strong>：tag 讓資源能被歸類，Lambda 讓變化能被看見，
+          兩者合起來才談得上 FinOps 與治理。也因為帳號狀態一直在變，這件事是<strong>持續在做</strong>、不是一次性任務。
+        </p>
+
+        <h2>5. 小結</h2>
+        <p>
+          一條主線：<strong>先把零散資源收進集中式 IaC 專案 → 用 <code>default_tags</code> 給所有資源一致的身份 →
+          再用 Lambda 把資源變更與用量變成可觀察的訊號</strong>。
+          中間最值得記的兩個點：apply 大範圍 tag 變更要<strong>分批、按 changed path、避免 run-all</strong>；
+          以及 <code>default_tags</code> <strong>不涵蓋 launch template</strong> 這個會默默漏 EC2 instance tag 的雷。
+        </p>
+      </div>
+
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+    </div>
+  </article>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

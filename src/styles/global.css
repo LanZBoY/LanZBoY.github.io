@@ -242,12 +242,29 @@ section { padding: 96px 0; }
   margin: 48px 0 16px; padding-top: 8px; border-top: 1px solid var(--border);
 }
 .prose h2::before { content: '# '; color: var(--accent); font-family: var(--mono); }
+.prose h3 {
+  font-size: 1.12rem; font-weight: 700; color: var(--text);
+  margin: 28px 0 12px;
+}
+.prose h3::before { content: '## '; color: var(--accent-2); font-family: var(--mono); font-size: .9em; }
 .prose p { color: var(--text-dim); margin-bottom: 16px; font-size: 1.02rem; }
 .prose strong { color: var(--text); font-weight: 600; }
 .prose em { color: var(--text); font-style: normal; opacity: .85; }
 .prose ul { color: var(--text-dim); margin: 0 0 18px; padding-left: 22px; }
 .prose li { margin-bottom: 8px; }
 .prose a { word-break: break-word; }
+
+/* blockquote / 前言 */
+.prose blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-soft);
+  border-radius: 0 10px 10px 0;
+  padding: 14px 20px; margin: 0 0 26px;
+  color: var(--text-dim); font-style: italic;
+}
+.prose blockquote p { margin-bottom: 8px; }
+.prose blockquote p:last-child { margin-bottom: 0; }
+.prose blockquote strong { font-style: normal; }
 
 /* inline code */
 .prose code {

@@ -115,6 +115,30 @@ export const skills = [
 // =====================================================================
 export const notes = [
   {
+    slug: 'eks-adot-xray-tracing',
+    title: '在 EKS 引入分散式追蹤：ADOT Collector → AWS X-Ray',
+    date: '2026-03-25',
+    summary:
+      '專案原本沒有 trace，服務鏈一出錯、或想知道哪一段慢，很難看清楚。於是在 EKS 部署 ADOT（AWS Distro for OpenTelemetry）collector，跟 app 端工程師配合把 OTLP 資料收進來、送到 AWS X-Ray。記錄 collector pipeline 的幾個關鍵設定：memory_limiter、batch 與處理順序。',
+    tags: ['AWS', 'EKS', 'Observability', 'OpenTelemetry', 'X-Ray', 'Tracing'],
+  },
+  {
+    slug: 'terragrunt-central-infra-default-tags',
+    title: '用集中式 Terragrunt 專案管零散 AWS 資源：default tags + Lambda 盤點監控',
+    date: '2026-03-23',
+    summary:
+      '原本「一個服務一個 Terragrunt」、沒有中央 infra 專案，零散的 AWS 資源沒人統一管。於是建了一個集中式 infra 管理專案，用 provider default_tags 統一打標籤（cost allocation / ownership），再寫 Lambda 定期盤點所有資源、偵測變更，並做 EC2 CPU、network、S3 用量趨勢，揪出異常。持續進行中。',
+    tags: ['AWS', 'Terragrunt', 'IaC', 'Lambda', 'FinOps', 'SRE'],
+  },
+  {
+    slug: 'eks-fluentbit-cloudwatch-log-groups',
+    title: 'EKS 日誌：用 Fluent Bit 收集 container log 進 CloudWatch，並按 app 切分 log group',
+    date: '2026-03-23',
+    summary:
+      '入職第一個任務。EKS 的 container log 透過 Fluent Bit（DaemonSet）收進 AWS CloudWatch。原本所有服務共用一個 log group、混在一起難排查，改用 cloudwatch_logs 的 log_group_template 吃 Kubernetes metadata，按 app name 動態切分 log group。含 Fluent Bit → CloudWatch 串聯架構與設定範例。',
+    tags: ['AWS', 'EKS', 'Observability', 'Fluent Bit', 'CloudWatch', 'Logging'],
+  },
+  {
     slug: 'eso-aws-secrets-manager',
     title: 'External Secrets Operator + AWS Secrets Manager 實作筆記',
     date: '2026-06-04',
