@@ -1,0 +1,46 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const sorted = [...notes].sort((a, b) => (a.date < b.date ? 1 : -1));
+---
+
+<Layout title={`技術筆記 · ${profile.name}`}>
+  <!-- 導覽列 -->
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="notes-index">
+    <div class="container">
+      <h2 class="section-title">技術筆記</h2>
+      <p class="section-subtitle">Engineering notes · 工作中的技術整理</p>
+      <div class="notes-list">
+        {sorted.map((n) => (
+          <a class="note-card" href={`/notes/${n.slug}/`}>
+            <p class="note-date">{n.date}</p>
+            <h3>{n.title}</h3>
+            <p class="note-summary">{n.summary}</p>
+            <div class="tags">{n.tags.map((t) => <span>{t}</span>)}</div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

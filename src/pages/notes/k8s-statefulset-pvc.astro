@@ -1,0 +1,355 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const meta = notes.find((n) => n.slug === 'k8s-statefulset-pvc')!;
+---
+
+<Layout title={`${meta.title} · ${profile.name}`}>
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="note">
+    <div class="container">
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+      <p class="note-date">{meta.date}</p>
+      <h1>{meta.title}</h1>
+      <div class="tags">{meta.tags.map((t) => <span>{t}</span>)}</div>
+
+      <div class="prose">
+        <p>
+          這篇從「StatefulSet 是什麼」出發，一路串到 PVC 為什麼要每個 Pod 一顆、PVC ↔ Pod 的綁定機制、
+          RWO / RWX / ROX 的物理原理，最後用 Postgres、Grafana 和 Observability stack 當實例收尾。
+          主軸是一句話：<strong>K8s 的儲存模型是在「雲端儲存的物理限制」跟「應用對資料的需求」之間做權衡</strong>。
+        </p>
+
+        <h2>1. StatefulSet 是什麼</h2>
+        <p>
+          StatefulSet 是 Kubernetes 中專門用來管理<strong>有狀態應用</strong>的工作負載控制器。
+          跟 Deployment 最大的差別在於：StatefulSet 給每個 Pod 一個<strong>穩定的身份</strong>，包括網路標識和儲存。
+        </p>
+        <p><strong>四大核心特性：</strong></p>
+        <ul>
+          <li><strong>(1) 穩定且可預測的 Pod 名稱</strong> — 名稱是 <code>&lt;statefulset-name&gt;-&lt;序號&gt;</code>，從 0 開始（<code>mysql-0</code>、<code>mysql-1</code>…），重啟後不變，跟 Deployment 隨機 hash 命名完全不同。</li>
+          <li><strong>(2) 穩定的網路識別</strong> — 搭配 Headless Service，每個 Pod 都有自己的 DNS 名稱，對叢集型應用（etcd、Kafka、Elasticsearch）很重要。</li>
+          <li><strong>(3) 穩定的持久化儲存</strong> — 透過 <code>volumeClaimTemplates</code>，每個 Pod 綁定屬於自己的 PVC，即使 Pod 重建或被調度到別節點，資料還是跟著它走。</li>
+          <li><strong>(4) 有序的部署與擴縮</strong> — 部署依序 0、1、2…（前一個 Ready 才建下一個）；縮容反向從最大序號刪；滾動更新預設也依序。對 leader-follower / quorum 應用很重要。</li>
+        </ul>
+        <p>典型 YAML：</p>
+        <pre><code>{`apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: "nginx"     # 對應的 Headless Service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:    # 每個 Pod 自動產生一個 PVC
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi`}</code></pre>
+
+        <h2>2. Headless Service 詳解</h2>
+        <p>StatefulSet 的「穩定網路識別」要靠 Headless Service 才能實現，所以這個概念必須一起理解。</p>
+        <p>
+          <strong>一般 Service</strong> 會被分配一個 <strong>ClusterIP</strong>（例如 <code>10.96.123.45</code>），
+          這個 IP 就是 Service 的「head」（入口）。<code>curl my-app:80</code> 時 DNS 回一個 ClusterIP，
+          kube-proxy 用 iptables/IPVS 把流量隨機轉發到某個 Pod —— 你只看到「一個 IP、一個入口」，背後幾個 Pod 完全不知道。
+        </p>
+        <p>
+          <strong>Headless Service</strong> 語法只差一行 <code>clusterIP: None</code> —— 這個 Service <strong>沒有自己的 IP</strong>。
+          DNS 查詢時直接回傳「所有後端 Pod 的 IP 列表」，由 client 決定連哪個，沒有 kube-proxy 介入、沒有 load balance。
+        </p>
+        <table>
+          <thead><tr><th>面向</th><th>一般 Service</th><th>Headless Service</th></tr></thead>
+          <tbody>
+            <tr><td>ClusterIP</td><td>有（如 <code>10.96.123.45</code>）</td><td>沒有（<code>None</code>）</td></tr>
+            <tr><td>DNS 回傳</td><td>一個 IP（Service 的 head）</td><td>所有 Pod 的 IP 列表</td></tr>
+            <tr><td>流量轉發</td><td>kube-proxy load balance</td><td>client 自己選</td></tr>
+            <tr><td>抽象層級</td><td>「我不在乎是哪個 Pod」</td><td>「我要直接連特定 Pod」</td></tr>
+          </tbody>
+        </table>
+        <p>當 StatefulSet 指定 <code>serviceName: postgres-headless</code>，會幫每個 Pod 註冊專屬 DNS 記錄：</p>
+        <pre><code>{`postgres-0.postgres-headless.default.svc.cluster.local  →  10.244.1.5
+postgres-1.postgres-headless.default.svc.cluster.local  →  10.244.2.7
+postgres-2.postgres-headless.default.svc.cluster.local  →  10.244.3.9`}</code></pre>
+        <p>
+          這就是 StatefulSet 能提供「穩定網路識別」的原因。用一般 Service 的話，
+          查詢 <code>postgres</code> 只會拿到 ClusterIP 後隨機轉發，<strong>無法直接指定</strong>要連 <code>postgres-1</code>。
+        </p>
+        <p><strong>什麼時候需要 Headless Service？</strong></p>
+        <ul>
+          <li>應用需要 peer-to-peer 溝通（Kafka broker 同步、etcd Raft 共識、ES 節點發現）—— 需明確知道每個成員是誰、IP 是什麼。</li>
+          <li>Client 想自己實作 load balance（如 Postgres：寫入連 <code>postgres-0</code> master、讀取輪詢 replicas）。</li>
+          <li>需直接連特定 Pod 做 debug：<code>psql -h postgres-1.postgres-headless</code> 而非隨機。</li>
+        </ul>
+        <p>
+          <strong>為什麼叫「Headless」？</strong>「沒有單一 IP 入口的 Service」，那個被拿掉的「head」就是 ClusterIP
+          （類比 headless browser / headless CMS）。心智模型：一般 Service 像餐廳<strong>接待櫃檯</strong>（哪桌不重要）；
+          Headless Service 像<strong>所有員工的分機表</strong>（想找誰自己撥）。StatefulSet 的場景通常要後者。
+        </p>
+
+        <h2>3. 跟 Deployment 的核心差異</h2>
+        <table>
+          <thead><tr><th>面向</th><th>Deployment</th><th>StatefulSet</th></tr></thead>
+          <tbody>
+            <tr><td>Pod 名稱</td><td>隨機 hash（<code>web-abc123</code>）</td><td>穩定序號（<code>postgres-0</code>）</td></tr>
+            <tr><td>網路識別</td><td>共用 Service ClusterIP</td><td>每個 Pod 一個 DNS 名稱</td></tr>
+            <tr><td>啟動順序</td><td>平行</td><td>依序（0 → 1 → 2）</td></tr>
+            <tr><td>PVC 建立</td><td>手動預先建好</td><td><code>volumeClaimTemplates</code> 自動產生</td></tr>
+            <tr><td>PVC 數量</td><td>通常 1 顆（所有 Pod 共用）</td><td>N 顆（每個 Pod 一顆）</td></tr>
+            <tr><td>適用場景</td><td>無狀態服務（API、worker）</td><td>有狀態服務（DB、Kafka、ES）</td></tr>
+          </tbody>
+        </table>
+
+        <h2>4. 重要釐清：StatefulSet 不知道誰是 Master</h2>
+        <p>
+          一個常見誤解是「<code>postgres-0</code> 就是 master，流量自動往 0 去」是 StatefulSet 處理的。<strong>這是錯的。</strong>
+          StatefulSet 只負責三件事：給 Pod 穩定名稱、給每個 Pod 自己的 PVC、有序啟動。它<strong>不會</strong>配置
+          Postgres replication、不知道誰是 master/replica、不處理 failover、不導向讀寫流量。
+        </p>
+        <p>實際的讀寫分流靠多個 Service + label：</p>
+        <pre><code>{`# Write Service - 只導到 master (postgres-0)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-write
+spec:
+  selector:
+    app: postgres
+    role: master       # 靠 label 篩選
+  ports:
+  - port: 5432
+---
+# Read Service - 導到 replicas
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-read
+spec:
+  selector:
+    app: postgres
+    role: replica
+  ports:
+  - port: 5432`}</code></pre>
+        <p>
+          實務上會用 <strong>Operator</strong>（CloudNativePG、Zalando Postgres Operator、Crunchy PGO）。
+          Operator 底層仍是 StatefulSet，但額外處理自動配置 master/replica、自動 failover、自動產生 read/write Service、備份 / PITR / 版本升級：
+        </p>
+        <pre><code>{`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-cluster
+spec:
+  instances: 3
+  storage:
+    size: 10Gi
+# 會自動產生 postgres-cluster-rw (寫) / -ro (讀 replica) / -r (讀任意實例)`}</code></pre>
+
+        <h2>5. 為什麼每個 Pod 要有自己的 PVC？</h2>
+        <p>核心原因：<strong>有狀態應用的每個實例，資料都不一樣</strong>。以 Postgres 為例：master 有完整資料 + WAL log，各 replica 有自己的 replication state、lag、WAL position 都不同。Kafka / ES / Cassandra 也是每個實例負責不同 partition / shard。</p>
+        <p><strong>為什麼不能共用？三層原因：</strong></p>
+        <ul>
+          <li><strong>物理限制</strong>：EBS、GCE PD、Azure Disk 這類雲端區塊儲存，一顆磁碟同時只能掛在一台機器上（雲端 API 硬限制）。</li>
+          <li><strong>即使支援 RWX，多個 DB 寫同目錄會壞</strong>：ext4 / xfs 假設「我獨佔磁碟」，多機掛載會 WAL 互搶 → 資料毀損、file lock 衝突、buffer cache 不一致。</li>
+          <li><strong>違背 replication 目的</strong>：三個 Pod 共用一顆磁碟 → 磁碟壞了三個都死 → 沒備援可言。</li>
+        </ul>
+
+        <h2>6. PVC ↔ Pod 的綁定機制（不是 selector！）</h2>
+        <p>
+          直覺上會以為 PVC 是用 selector + label 動態綁定到 Pod，其實不是。
+          StatefulSet 用最樸素但有效的方法：<strong>靠名稱寫死</strong>。
+          <code>volumeClaimTemplates</code> 自動產生的 PVC 命名規則是
+          <code>&lt;volumeClaimTemplate.name&gt;-&lt;statefulset.name&gt;-&lt;序號&gt;</code>，所以實際是
+          <code>data-postgres-0</code>、<code>data-postgres-1</code>… 然後 Pod spec 直接寫死 <code>claimName: data-postgres-1</code>。
+          沒有 selector、沒有 label matching，就是<strong>字串拼接</strong>。
+        </p>
+        <pre><code>{`Pod ←─[名稱寫死]─→ PVC ←─[動態綁定]─→ PV ←─[實際存在]─→ 底層儲存`}</code></pre>
+        <table>
+          <thead><tr><th>綁定關係</th><th>機制</th></tr></thead>
+          <tbody>
+            <tr><td>Pod ↔ PVC</td><td><strong>名稱寫死</strong>（StatefulSet 的工作）</td></tr>
+            <tr><td>PVC ↔ PV</td><td><strong>動態綁定</strong>（PV Controller 撮合：容量、accessMode、StorageClass）</td></tr>
+            <tr><td>PV ↔ 底層儲存</td><td>PV 物件記載真實後端（EBS volume ID、NFS path 等）</td></tr>
+            <tr><td>StatefulSet ↔ Pod</td><td>Label selector（給 controller 認領 Pod 用，不參與 PVC 綁定）</td></tr>
+          </tbody>
+        </table>
+        <p>
+          <strong>容易踩的坑：刪 StatefulSet 不會刪 PVC。</strong><code>kubectl delete statefulset postgres</code> 只刪 Pod，
+          PVC 還留著、資料還在（故意的安全設計）。要刪資料要明確 <code>kubectl delete pvc data-postgres-0 …</code>。
+          K8s 1.27+ 有 <code>persistentVolumeClaimRetentionPolicy</code> 可改這行為。
+        </p>
+
+        <h2>7. Deployment + PVC 的綁定流程</h2>
+        <p>跟 StatefulSet 很不一樣，因為 Deployment 通常是<strong>所有 Pod 共用同一顆 PVC</strong>（先手動建 PVC，Deployment 再引用同一個 <code>claimName</code>）。</p>
+        <p>
+          <strong>馬上會踩到的問題：RWO + replicas &gt; 1。</strong>RWO 同時只能掛在「一個節點」上。
+          三個 Pod 同節點 → 可以跑（但失去 HA）；三個 Pod 不同節點 → 後兩個卡在 <code>ContainerCreating</code>，
+          事件顯示 <code>Multi-Attach error</code>。<strong>Deployment + RWO PVC + replicas &gt; 1 基本上就是反模式。</strong>
+        </p>
+
+        <h2>8. RWO / RWX / ROX 的物理原理</h2>
+        <table>
+          <thead><tr><th>Mode</th><th>意義</th><th>典型儲存</th></tr></thead>
+          <tbody>
+            <tr><td>ReadWriteOnce (RWO)</td><td>同時只能一個 <strong>node</strong> 掛載讀寫</td><td>EBS、GCE PD、Azure Disk</td></tr>
+            <tr><td>ReadOnlyMany (ROX)</td><td>多節點同時唯讀</td><td>NFS、EFS、CephFS</td></tr>
+            <tr><td>ReadWriteMany (RWX)</td><td>多節點同時讀寫</td><td>NFS、EFS、CephFS、GlusterFS</td></tr>
+          </tbody>
+        </table>
+        <p><strong>關鍵：RWO 限制的是「node」不是「Pod」。</strong>同一節點上的多個 Pod 可以共用一顆 RWO PVC，這常被誤解。</p>
+        <p>
+          <strong>為什麼 RWO 只能單節點？</strong>區塊儲存暴露的是<strong>原始磁碟介面</strong>，上面跑檔案系統（ext4 / xfs），
+          而檔案系統設計上假設「我是唯一使用者」——它在記憶體裡 cache metadata、journal、inode table。兩台機器同時 mount 同一個 ext4 會直接毀損。
+        </p>
+        <p>
+          <strong>為什麼 RWX 可以多節點？</strong>RWX 通常是檔案 / 物件儲存：NFS / EFS mount 的不是 block device 而是「網路上的目錄」，
+          NFS server 在背後協調所有 client 的讀寫與 file lock；CephFS / GlusterFS 有自己的 metadata server 和 lock manager。
+          共通點是<strong>有一個「協調者」處理多 client 並發</strong>。
+        </p>
+        <pre><code>{`RWO (EBS):                          RWX (NFS):
+
+   Node A                              Node A ──┐
+     ↓                                          │
+   [EBS] ← 只能一個                    Node B ──┼→ [NFS Server]
+                                                │       ↓
+                                       Node C ──┘   [底層儲存]
+
+   實體 attach 關係              網路協議共享，server 協調`}</code></pre>
+
+        <h2>9. NFS + ReadOnlyMany 的多節點共享</h2>
+        <p>因為 NFS 物理上本來就支援多節點存取，NFS PV 三種 accessMode 都能設，<strong>ROX 是個很實用的模式</strong>。典型場景是共享 ML model：</p>
+        <pre><code>{`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models
+spec:
+  accessModes: ["ReadOnlyMany"]
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  replicas: 10              # 10 個 inference Pod
+  template:
+    spec:
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: ml-models
+          readOnly: true     # Pod 層級也標記 readOnly
+      containers:
+      - name: inference
+        volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true`}</code></pre>
+        <p>
+          10 個 Pod 散落不同節點都能讀同一份 model，不需打包進 image、也不需每個 Pod 啟動時下載。
+          其他 ROX 場景：共享詞典 / 語料庫、CMS 靜態檔案多副本共讀、共享設定檔。
+        </p>
+        <p>
+          <strong>陷阱：readOnly 要兩層都設。</strong>只在 PVC 設 ROX 但 Pod 沒標 <code>readOnly: true</code>，
+          有些 CSI driver 還是會以 read-write 掛上去（NFS server 本身不阻止寫入）。PVC <code>accessModes</code> 與 Pod 引用時的
+          <code>readOnly: true</code>（<code>volumes</code> 與 <code>volumeMounts</code> 兩處）都要設。
+        </p>
+
+        <h2>10. 實務模式：什麼時候用哪個？</h2>
+        <table>
+          <thead><tr><th>需求</th><th>推薦做法</th><th>典型應用</th></tr></thead>
+          <tbody>
+            <tr><td>單實例 + 需要持久化</td><td><strong>Deployment + PVC + Recreate</strong></td><td>Grafana、Jenkins、Gitea、Sonarqube</td></tr>
+            <tr><td>多實例 + 每個實例資料不同</td><td><strong>StatefulSet + volumeClaimTemplates</strong></td><td>Postgres、Kafka、ES、etcd</td></tr>
+            <tr><td>多實例 + 共享資料</td><td><strong>Deployment + RWX PVC</strong></td><td>WordPress、靜態網站、CMS</td></tr>
+            <tr><td>完全無狀態</td><td><strong>Deployment（不用 PVC）</strong></td><td>API server、worker、proxy</td></tr>
+          </tbody>
+        </table>
+
+        <h2>11. Grafana 案例分析</h2>
+        <p>Grafana 是「單副本 + PVC + Recreate」的標準範例，官方 Helm chart 預設就是這樣。</p>
+        <p>
+          <strong>為什麼一定要 <code>strategy: Recreate</code>？</strong>Deployment 預設是 <code>RollingUpdate</code>：舊 Pod 還活著就起新 Pod，
+          這時兩個 Pod 同時存在。若新舊 Pod 排到不同節點 + RWO PVC，新 Pod 想掛 PVC 會 <code>Multi-Attach error</code> 卡在
+          <code>ContainerCreating</code>，舊 Pod 又永遠殺不掉 → 部署死鎖。<code>Recreate</code> 流程是先殺舊 Pod → 等 volume detach → 起新 Pod，
+          代價是 10–60 秒 downtime，對 Grafana 完全可接受。
+        </p>
+        <p>
+          <strong>為什麼 Grafana 適合單副本？</strong>Grafana 預設用 <strong>SQLite</strong> 存 dashboard / user / datasource 設定，
+          SQLite 天生單寫入者、跨節點無法多寫。所以：有 PVC 存 SQLite（stateful）、單副本（SQLite 不能多寫）、Recreate（避免 RWO 衝突）。
+          StatefulSet 的三大特性它一個都用不到。
+        </p>
+        <p><strong>升級到 HA Grafana</strong>：把 SQLite 換成外部資料庫，Grafana 就變成真正無狀態：</p>
+        <pre><code>{`env:
+- name: GF_DATABASE_TYPE
+  value: postgres
+- name: GF_DATABASE_HOST
+  value: postgres.db.svc:5432
+- name: GF_DATABASE_NAME
+  value: grafana`}</code></pre>
+        <p>這時可以 <code>replicas: 3</code>、不需要 PVC（或只放 plugin 快取用 emptyDir）、前面掛 Service load balance、用 RollingUpdate。</p>
+
+        <h2>12. Observability Stack 各組件的 workload 選擇</h2>
+        <table>
+          <thead><tr><th>組件</th><th>Workload Type</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>Prometheus</td><td>StatefulSet</td><td>TSDB 資料每個 instance 不同，需要穩定 PVC</td></tr>
+            <tr><td>Loki (single-binary)</td><td>StatefulSet 或 Deployment + PVC</td><td>有 chunk 本地快取</td></tr>
+            <tr><td>Loki (microservices)</td><td>分組件</td><td>ingester 是 StatefulSet（有 WAL）；querier 是 Deployment（無狀態）</td></tr>
+            <tr><td>Tempo</td><td>類似 Loki</td><td>同上</td></tr>
+            <tr><td>Grafana</td><td>Deployment + PVC + Recreate</td><td>如上節</td></tr>
+            <tr><td>Grafana Alloy</td><td>DaemonSet 或 Deployment</td><td>每節點收 local 資料 → DaemonSet；中心化處理 → Deployment</td></tr>
+          </tbody>
+        </table>
+        <p><strong>串起來的學習脈絡：</strong></p>
+        <ol>
+          <li>StatefulSet 的設計哲學 → 給有狀態 Pod 穩定身份</li>
+          <li>每個有狀態實例資料不同 → 所以每個 Pod 需要獨立 PVC</li>
+          <li>用 <code>volumeClaimTemplates</code> + 名稱拼接保證綁定 → 靠的不是 selector</li>
+          <li>網路上的穩定身份靠 Headless Service 提供 → 每個 Pod 一個 DNS 名稱</li>
+          <li>RWO 的物理限制來自雲端區塊儲存的 attach 行為</li>
+          <li>要多節點共享得用 NFS / EFS 等網路檔案系統（協議層協調並發）</li>
+          <li>整個 K8s 儲存模型 = 雲端儲存物理限制 + 應用資料需求的權衡</li>
+        </ol>
+      </div>
+
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+    </div>
+  </article>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

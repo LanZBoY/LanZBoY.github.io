@@ -110,6 +110,37 @@ export const skills = [
 ];
 
 // =====================================================================
+//  技術筆記 Notes — 對外公開、已去識別化的技術整理
+//  每篇文章本體放在 src/pages/notes/<slug>.astro
+// =====================================================================
+export const notes = [
+  {
+    slug: 'eso-aws-secrets-manager',
+    title: 'External Secrets Operator + AWS Secrets Manager 實作筆記',
+    date: '2026-06-04',
+    summary:
+      '用 ESO 把 AWS Secrets Manager 的 secret 同步進 EKS、再接上 Stakater Reloader 自動套用的設計與踩坑：SecretStore vs ExternalSecret 的職責、授權邊界為何由 IRSA policy 決定、secret 分層命名、JSON 多 key、輪詢 vs push、IAM ARN wildcard 等。',
+    tags: ['Kubernetes', 'AWS', 'Secrets', 'ESO', 'IRSA', 'SRE'],
+  },
+  {
+    slug: 'k8s-statefulset-pvc',
+    title: 'Kubernetes：StatefulSet、PVC 與儲存模型',
+    date: '2026-05-13',
+    summary:
+      '從 StatefulSet 的設計哲學一路串到 PV/PVC 綁定機制、Headless Service、RWO/RWX/ROX 的物理原理，最後用 Postgres、Grafana 與 Observability stack 當實例收尾。主軸：K8s 儲存模型是在「雲端儲存的物理限制」與「應用對資料的需求」之間做權衡。',
+    tags: ['Kubernetes', 'StatefulSet', 'PVC', 'Storage', 'Observability'],
+  },
+  {
+    slug: 'grafana-faro-rum',
+    title: 'Grafana Faro 前端可觀測性 (RUM)：從觀念到自架實作',
+    date: '2026-06-05',
+    summary:
+      '整合我在建置前端 RUM Dashboard 時的工作筆記：RUM 與 Faro 的核心觀念、自架資料流 (Alloy → Loki / Tempo)，以及實作時踩過的 LogQL、Web Vitals、Grafana 變數與 panel 選型細節。',
+    tags: ['Observability', 'Grafana', 'Faro', 'RUM', 'LogQL'],
+  },
+];
+
+// =====================================================================
 //  作品集 Portfolio — 一個物件就是一張卡片
 // =====================================================================
 export const projects = [
