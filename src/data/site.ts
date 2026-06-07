@@ -115,6 +115,14 @@ export const skills = [
 // =====================================================================
 export const notes = [
   {
+    slug: 'opentelemetry-three-pillars-grafana',
+    title: '導入 OpenTelemetry：可觀測性三大支柱與 Grafana 的關係（概念篇）',
+    date: '2026-04-24',
+    summary:
+      '把原本綁在 AWS 的 X-Ray、CloudWatch metrics、CloudWatch log group 逐一抽換成自建的 Tempo、Prometheus、Loki，再用 Grafana 統一串接。這篇是概念篇，不細講實作與架構，主要講可觀測性三大支柱（Metrics / Logs / Traces）跟 Grafana 之間的關係，以及 OpenTelemetry 為什麼是讓這場遷移成立的關鍵。',
+    tags: ['Observability', 'OpenTelemetry', 'Grafana', 'Prometheus', 'Loki', 'Tempo'],
+  },
+  {
     slug: 'eks-adot-xray-tracing',
     title: '在 EKS 引入分散式追蹤：ADOT Collector → AWS X-Ray',
     date: '2026-03-25',

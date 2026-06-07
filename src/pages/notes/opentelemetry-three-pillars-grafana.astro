@@ -1,0 +1,239 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const meta = notes.find((n) => n.slug === 'opentelemetry-three-pillars-grafana')!;
+
+// 三支柱串連示範圖的資料（情境：來電 → AI 辨識訂位意圖 → 寫入訂位延遲）
+const spans = [
+  { label: 'POST /voice-call',        indent: 0, ms: '2400ms', off: 0,  w: 100, red: false },
+  { label: 'processIntent',           indent: 1, ms: '2300ms', off: 2,  w: 96,  red: false },
+  { label: 'speech-to-text',          indent: 2, ms: '120ms',  off: 2,  w: 5,   red: false },
+  { label: 'llm.detectIntent',        indent: 2, ms: '240ms',  off: 7,  w: 10,  red: false },
+  { label: 'http POST /reservati…',   indent: 2, ms: '2100ms', off: 12, w: 87,  red: true },
+  { label: 'createReservation',       indent: 3, ms: '2050ms', off: 15, w: 85,  red: true },
+  { label: 'db.acquireConn',          indent: 4, ms: '2000ms', off: 17, w: 83,  red: true },
+];
+const logs = [
+  { ts: '14:23:01.124', svc: 'voice-gateway', cls: '',         msg: 'INFO  收到來電 call_id=c-5821' },
+  { ts: '14:23:01.486', svc: 'ai-core',       cls: '',         msg: 'INFO  意圖辨識完成 intent=reservation conf=0.94' },
+  { ts: '14:23:01.502', svc: 'reservation',   cls: 'obs-warn', msg: 'WARN  連線池快用完 (98/100)' },
+  { ts: '14:23:03.291', svc: 'reservation',   cls: 'obs-err',  msg: 'ERROR 等待 DB 連線逾時 timeout=2000ms' },
+  { ts: '14:23:03.524', svc: 'reservation',   cls: 'obs-err',  msg: 'ERROR 訂位建立失敗 retry=3' },
+];
+---
+
+<Layout title={`${meta.title} · ${profile.name}`}>
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="note">
+    <div class="container">
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+      <p class="note-date">{meta.date}</p>
+      <h1>{meta.title}</h1>
+      <div class="tags">{meta.tags.map((t) => <span>{t}</span>)}</div>
+
+      <div class="prose">
+        <p>
+          這是一篇<strong>概念篇</strong>。我們把原本綁在 AWS 上的可觀測性 —— X-Ray（trace）、
+          CloudWatch metrics、CloudWatch log group —— <strong>一個模組一個模組抽換</strong>成自建的
+          Tempo、Prometheus、Loki，再用 Grafana 串起來。實作與架構細節留到後續各篇，
+          這裡只把三件事講清楚：<strong>三大支柱各是什麼、它們跟 Grafana 的關係、以及 OpenTelemetry 為什麼是這場遷移的關鍵</strong>。
+        </p>
+
+        <h2>1. 為什麼要導入 OpenTelemetry</h2>
+        <p>
+          原本的 observability 是「跟著雲廠商走」：trace 在 X-Ray、metrics 和 log 在 CloudWatch。
+          會想換成自建，主要是這三個動機：
+        </p>
+        <ul>
+          <li><strong>廠商中立、避免綁定</strong>：儀器化若綁死特定後端（X-Ray SDK、CloudWatch agent），想換工具就得回頭改 app。這是最核心的痛點。</li>
+          <li><strong>成本與控制</strong>：託管服務用量一大成本就上去，取樣率、retention 這些能調整的空間也有限；自建能自己控成本、資料自留。</li>
+          <li><strong>收斂到一套開源生態</strong>：把所有訊號（包含<strong>非 AWS 來源</strong>，例如前端 RUM）收進同一套 Grafana 生態，dashboard、查詢與關聯的心智一致，不必在多個 console 之間切換。</li>
+        </ul>
+        <p class="aside">
+          備註：這裡的動機<strong>不</strong>包含「AWS 不能關聯訊號」—— CloudWatch ServiceLens 本來就能靠 trace ID
+          把 trace / metrics / logs 串起來。換自建的考量是中立、成本與開源生態整合，不是關聯能力本身。
+        </p>
+        <p>
+          <strong>OpenTelemetry（OTel）</strong>是一套<strong>廠商中立的可觀測性標準</strong>：統一的資料模型、
+          統一的傳輸協定（OTLP）、以及一個可以接收 / 處理 / 分流的 Collector。它的價值是<strong>把「儀器化」跟「後端」解耦</strong>
+          —— app 只依賴 OTel 一次，後端要送去哪裡（X-Ray？Tempo？）變成設定問題，而不是改 code 的問題。
+          這正是我們敢「逐一抽換後端」的底氣。
+        </p>
+
+        <h2>2. 可觀測性的三大支柱</h2>
+        <p>三大支柱不是同一件事的三種畫法，而是<strong>回答三種不同問題</strong>的三種訊號：</p>
+        <table>
+          <thead><tr><th>支柱</th><th>回答的問題</th><th>資料形態</th><th>自建後端</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Metrics</strong></td><td>「現在數值多少、趨勢如何、健不健康？」——最適合做<strong>告警</strong>與大盤</td><td>已聚合的時間序列</td><td>Prometheus</td></tr>
+            <tr><td><strong>Logs</strong></td><td>「那一刻<strong>到底發生什麼</strong>？」——細節、錯誤訊息、上下文</td><td>離散事件</td><td>Loki</td></tr>
+            <tr><td><strong>Traces</strong></td><td>「一個請求在服務之間<strong>怎麼流、卡在哪</strong>？」——跨服務的因果鏈</td><td>跨服務的呼叫鏈（span 樹）</td><td>Tempo</td></tr>
+          </tbody>
+        </table>
+        <p>
+          典型的排查節奏就是三者接力：<strong>metric 告警</strong>發現「某服務延遲變高」→ 用 <strong>trace</strong> 定位「是鏈上哪一段慢」
+          → 翻那一段的 <strong>log</strong> 看「到底為什麼慢 / 噴什麼錯」。少了任何一支，這條線就會斷掉。
+        </p>
+
+        <p>用一個實際情境把三支柱串起來：</p>
+        <div class="obs-demo">
+          <p class="obs-scenario">情境：使用者來電，AI 辨識意圖為「訂位」，<b>寫入訂位資料時發生延遲</b>。</p>
+          <div class="obs-flow">
+            <span class="obs-chip">📞 Voice Gateway</span> →
+            <span class="obs-chip">🤖 AI Core</span> →
+            <span class="obs-chip">🗓️ Reservation</span>
+          </div>
+
+          <div class="obs-steps">
+            <div class="obs-step"><span class="obs-num">01</span><div><strong>Metrics</strong><small>先發現異常 · 告警觸發</small></div></div>
+            <span class="obs-step-arrow">→</span>
+            <div class="obs-step"><span class="obs-num">02</span><div><strong>Traces</strong><small>定位卡在呼叫鏈哪段</small></div></div>
+            <span class="obs-step-arrow">→</span>
+            <div class="obs-step"><span class="obs-num">03</span><div><strong>Logs</strong><small>查出當下的根本原因</small></div></div>
+          </div>
+
+          <div class="obs-panel">
+            <div class="obs-panel-head"><span class="obs-badge">M</span> Metrics <span class="obs-q">三個服務現在健康嗎？</span></div>
+            <div class="obs-metrics">
+              <div class="obs-card">
+                <span class="obs-svc">service=voice-gateway</span>
+                <div class="obs-row"><span>concurrent</span><b>42</b></div>
+                <div class="obs-row"><span>cpu</span><b>28%</b></div>
+                <div class="obs-row"><span>err%</span><b>0.2%</b></div>
+                <div class="obs-stat">● healthy</div>
+              </div>
+              <div class="obs-card">
+                <span class="obs-svc">service=ai-core</span>
+                <div class="obs-row"><span>llm p95</span><b>380ms</b></div>
+                <div class="obs-row"><span>cpu</span><b>52%</b></div>
+                <div class="obs-row"><span>err%</span><b>0.5%</b></div>
+                <div class="obs-stat">● healthy</div>
+              </div>
+              <div class="obs-card obs-alert">
+                <span class="obs-svc">service=reservation-svc</span>
+                <div class="obs-row"><span>db p95</span><b>1.9s</b></div>
+                <div class="obs-row"><span>cpu</span><b>88%</b></div>
+                <div class="obs-row"><span>err%</span><b>14.2%</b></div>
+                <div class="obs-stat">● ALERT @ 14:23</div>
+              </div>
+            </div>
+            <p class="obs-note">🔔 儀表板先警告 → 鎖定 <strong>service=reservation-svc</strong> 在 <strong>14:23</strong> 出事 → 用「service + 時間」兩個維度去撈 traces。</p>
+          </div>
+
+          <div class="obs-cols">
+            <div class="obs-panel">
+              <div class="obs-panel-head"><span class="obs-badge">T</span> Traces <span class="obs-q">卡在呼叫鏈哪一段？</span></div>
+              <p class="obs-sample">sample &nbsp;<b>trace_id = a7f3b2</b></p>
+              <div class="obs-trace-axis"><span>0ms</span><span>600</span><span>1200</span><span>1800</span><span>2400ms</span></div>
+              {spans.map((s) => (
+                <div class="obs-span">
+                  <span class="obs-span-label" style={`padding-left:${s.indent * 12}px`}>{s.indent > 0 ? '└ ' : ''}{s.label}</span>
+                  <span class="obs-span-track"><span class:list={['obs-bar', { red: s.red }]} style={`left:${s.off}%;width:${s.w}%`} /></span>
+                  <span class="obs-span-ms">{s.ms}</span>
+                </div>
+              ))}
+              <p class="obs-note">🎯 瓶頸鎖定在 <strong>db.acquireConn</strong> 卡滿 2 秒觸發逾時；AI 推理本身只花 360ms。</p>
+            </div>
+
+            <div class="obs-panel">
+              <div class="obs-panel-head"><span class="obs-badge">L</span> Logs <span class="obs-q">訂位服務當時發生什麼？</span></div>
+              <div class="obs-logs">
+                {logs.map((l) => (
+                  <div class="obs-logline">
+                    <span class="obs-ts">{l.ts}</span> <span class="obs-stag">[{l.svc}]</span>{' '}
+                    <span class={l.cls}>{l.msg}</span> <span class="obs-tid">trace_id=a7f3b2</span>
+                  </div>
+                ))}
+              </div>
+              <p class="obs-note">💡 真相大白 → AI 已成功辨識「訂位」意圖，但<strong>訂位服務 DB 連線池耗盡</strong>，寫入逾時導致訂位失敗。</p>
+            </div>
+          </div>
+        </div>
+
+        <h2>3. 對應的後端：LGTM stack</h2>
+        <p>
+          自建這側用的是 Grafana Labs 的開源組合，常被稱為 <strong>LGTM</strong>：
+          <strong>L</strong>oki（logs）、<strong>G</strong>rafana（介面）、<strong>T</strong>empo（traces）、
+          <strong>M</strong>imir / Prometheus（metrics）。三個資料後端的設計哲學很一致 —— 都走
+          <strong>label 索引 + 物件儲存（S3）放主體</strong>，所以查詢語言、oper 心智、儲存成本模型都相通，學一套通三套。
+        </p>
+        <table>
+          <thead><tr><th>原本（AWS 託管）</th><th>抽換成（自建）</th><th>支柱</th></tr></thead>
+          <tbody>
+            <tr><td>AWS X-Ray</td><td>Tempo</td><td>Traces</td></tr>
+            <tr><td>CloudWatch Metrics</td><td>Prometheus</td><td>Metrics</td></tr>
+            <tr><td>CloudWatch Logs / log group</td><td>Loki</td><td>Logs</td></tr>
+            <tr><td>各自的 AWS console</td><td>Grafana</td><td>統一介面</td></tr>
+          </tbody>
+        </table>
+
+        <h2>4. Grafana 的角色：不只是「看板」，是把三支柱接起來的樞紐</h2>
+        <div class="flow">
+          <div class="flow-node"><strong>應用服務</strong><small>OpenTelemetry SDK：一次儀器化</small></div>
+          <div class="flow-arrow"><span class="flow-label">OTLP（廠商中立格式）</span></div>
+          <div class="flow-node flow-accent"><strong>OpenTelemetry Collector</strong><small>統一收集層：接收 → 處理 → 分流</small></div>
+          <div class="flow-branch">
+            <div class="flow-col"><span class="flow-path">Metrics</span><div class="flow-node flow-store"><strong>Prometheus</strong></div></div>
+            <div class="flow-col"><span class="flow-path">Logs</span><div class="flow-node flow-store"><strong>Loki</strong></div></div>
+            <div class="flow-col"><span class="flow-path">Traces</span><div class="flow-node flow-store"><strong>Tempo</strong></div></div>
+          </div>
+          <div class="flow-arrow"><span class="flow-label">三個 datasource 接進來，並互相關聯</span></div>
+          <div class="flow-node flow-accent"><strong>Grafana</strong><small>單一查詢介面 + 三支柱關聯</small></div>
+        </div>
+        <p>
+          把三個後端都接成 Grafana 的 datasource，最大的價值不是「在同一個網站看」，而是<strong>讓三種訊號互相跳轉、彼此關聯</strong>。
+          在自建這套裡，關聯主要靠這幾條：
+        </p>
+        <ul>
+          <li><strong>Trace → Logs</strong>：在一條 trace 上，直接跳到對應時間 / 服務的 log，看那一刻發生什麼。</li>
+          <li><strong>Trace → Metrics</strong>：由 trace 衍生出 service graph 與每段的延遲 / 錯誤率指標。</li>
+          <li><strong>Metrics → Trace</strong>：metric 圖上的 <em>exemplar</em>（樣本點）可以直接點進「造成這個數值的那一條 trace」。</li>
+        </ul>
+        <p>
+          換句話說，Grafana 把「metric 發現問題 → trace 定位 → log 看細節」這條排查動線變成<strong>在同一個介面裡幾下點擊就能走完</strong>，
+          而不是在三個 console 之間人工拼湊。<strong>這就是三大支柱跟 Grafana 之間的關係</strong>。
+        </p>
+
+        <h2>5. OpenTelemetry 為什麼讓「逐一抽換」變得可行</h2>
+        <p>
+          回到開頭：之所以能<strong>一個模組一個模組</strong>把 X-Ray 換 Tempo、CloudWatch metrics 換 Prometheus、log group 換 Loki，
+          靠的就是 OTel 把<strong>收集層</strong>標準化了。app 端統一吐 OTLP 給 Collector，Collector 裡每種訊號各一條 pipeline，
+          要送去哪個後端只是改 exporter 設定 —— 抽換後端時，<strong>app 不用重新儀器化</strong>，遷移風險被切成一塊一塊、可以分批安全推進。
+        </p>
+        <p>
+          所以「導入 OpenTelemetry」不只是多裝一個工具，而是<strong>先確立一個中立的收集標準，再讓背後的可觀測性後端可以自由演進</strong>。
+          有了這層，從 AWS 託管搬到自建 LGTM 才不是一次性的大爆破，而是一連串可控的小步替換。
+        </p>
+
+        <h2>小結</h2>
+        <p>
+          一張圖記住：<strong>三大支柱（Metrics / Logs / Traces）回答三種問題，分別落在 Prometheus / Loki / Tempo，
+          再由 Grafana 統一查詢並互相關聯；而 OpenTelemetry 是中間那層中立的收集標準，讓後端能被逐一抽換。</strong>
+          這篇是概念地圖，後續會再分篇細講各支柱的自建實作。
+        </p>
+      </div>
+
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+    </div>
+  </article>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

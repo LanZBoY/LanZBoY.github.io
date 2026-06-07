@@ -266,6 +266,14 @@ section { padding: 96px 0; }
 .prose blockquote p:last-child { margin-bottom: 0; }
 .prose blockquote strong { font-style: normal; }
 
+/* 備註 / footnote */
+.prose .aside {
+  font-size: .88rem; color: var(--text-dim);
+  border-left: 2px solid var(--border);
+  padding-left: 14px; margin: -4px 0 22px;
+}
+.prose .aside strong { color: var(--text-dim); }
+
 /* inline code */
 .prose code {
   font-family: var(--mono); font-size: .86em;
@@ -367,6 +375,96 @@ section { padding: 96px 0; }
   .flow-col::before { display: none; }
   .flow-node { min-width: 0; }
 }
+
+/* ---------- 可觀測性三支柱示範圖 ---------- */
+.obs-demo {
+  --obs-green: #34d399; --obs-red: #f87171; --obs-yellow: #fbbf24;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-soft); padding: 20px; margin: 10px 0 26px;
+}
+.obs-scenario { color: var(--text); font-size: .92rem; margin-bottom: 12px; }
+.obs-scenario b { color: var(--accent); }
+.obs-flow {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 18px; font-family: var(--mono); font-size: .8rem; color: var(--text-dim);
+}
+.obs-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 12px; color: var(--text);
+}
+.obs-steps {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 16px;
+}
+.obs-step { display: flex; align-items: center; gap: 10px; }
+.obs-num {
+  font-family: var(--mono); font-size: .72rem; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px;
+}
+.obs-step strong { color: var(--text); font-size: .92rem; }
+.obs-step small { color: var(--text-dim); display: block; font-size: .76rem; }
+.obs-step-arrow { color: var(--text-dim); }
+
+.obs-panel {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 14px; background: rgba(0,0,0,.18);
+}
+.obs-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; color: var(--text); margin-bottom: 12px;
+}
+.obs-badge {
+  font-family: var(--mono); font-size: .72rem;
+  width: 22px; height: 22px; display: inline-flex;
+  align-items: center; justify-content: center; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--accent);
+}
+.obs-q { margin-left: auto; color: var(--text-dim); font-weight: 400; font-size: .78rem; font-style: italic; }
+
+.obs-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.obs-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: .78rem; }
+.obs-svc { display: inline-block; color: var(--obs-green); background: rgba(52,211,153,.1); padding: 2px 8px; border-radius: 5px; margin-bottom: 8px; font-size: .76rem; }
+.obs-row { display: flex; justify-content: space-between; color: var(--text-dim); }
+.obs-row b { color: var(--text); font-weight: 600; }
+.obs-stat { margin-top: 8px; font-size: .74rem; color: var(--obs-green); }
+.obs-card.obs-alert { border-color: var(--obs-red); background: rgba(248,113,113,.06); }
+.obs-alert .obs-svc { color: var(--obs-red); background: rgba(248,113,113,.12); }
+.obs-alert .obs-row b { color: var(--obs-red); }
+.obs-alert .obs-stat { color: var(--obs-red); }
+
+.obs-note { font-size: .8rem; color: var(--text-dim); margin: 12px 0 0; }
+
+/* Traces / Logs 一律上下堆疊 —— 文章內文欄寬僅 ~820px，並排會把 log 擠到難讀；
+   堆疊讓兩者都吃滿欄寬，也正好呼應 01 → 02 → 03 的流程順序 */
+.obs-cols { display: grid; grid-template-columns: 1fr; gap: 14px; }
+/* 讓 grid 子項能縮到比內容小，內部 overflow-x:auto 才會生效（否則 nowrap 的 log 會撐破版面） */
+.obs-metrics > *, .obs-cols > * { min-width: 0; }
+@media (max-width: 620px) { .obs-metrics { grid-template-columns: 1fr; } }
+@media (max-width: 480px) {
+  .obs-span { grid-template-columns: 108px 1fr 46px; gap: 6px; }
+  .obs-logs { font-size: .64rem; }
+  .obs-steps { gap: 8px; }
+}
+
+.obs-trace-axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: .66rem; color: var(--text-dim); margin: 2px 0 8px; }
+.obs-sample { font-family: var(--mono); font-size: .72rem; color: var(--text-dim); margin-bottom: 10px; }
+.obs-sample b { color: var(--accent-2); background: rgba(167,139,250,.1); padding: 2px 7px; border-radius: 5px; }
+.obs-span { display: grid; grid-template-columns: 150px 1fr 56px; align-items: center; gap: 8px; margin-bottom: 5px; font-family: var(--mono); font-size: .7rem; }
+.obs-span-label { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.obs-span-track { background: rgba(255,255,255,.04); border-radius: 4px; height: 13px; position: relative; }
+.obs-bar { position: absolute; height: 100%; border-radius: 4px; background: var(--obs-green); }
+.obs-bar.red { background: var(--obs-red); }
+.obs-span-ms { text-align: right; color: var(--text-dim); }
+
+.obs-logs { font-family: var(--mono); font-size: .7rem; line-height: 1.95; background: rgba(0,0,0,.32); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.obs-logline { white-space: nowrap; color: var(--text-dim); }
+.obs-ts { color: #6b7a90; }
+.obs-stag { color: var(--accent); }
+.obs-warn { color: var(--obs-yellow); }
+.obs-err { color: var(--obs-red); }
+.obs-tid { color: var(--accent-2); }
 
 /* ---------- 頁尾 ---------- */
 footer {
