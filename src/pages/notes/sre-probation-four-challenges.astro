@@ -1,0 +1,199 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { notes, profile } from '../../data/site';
+
+const meta = notes.find((n) => n.slug === 'sre-probation-four-challenges')!;
+
+// 四大挑戰的索引卡資料
+const challenges = [
+  { no: '01', title: '帳號權限過鬆', sub: 'IAM 最小權限與漸進式限縮' },
+  { no: '02', title: 'App 身分混亂', sub: 'IAM User → IRSA' },
+  { no: '03', title: 'S3 盤查治理', sub: '萬年資源與標籤化' },
+  { no: '04', title: 'Terragrunt 分裂', sub: 'GCP / AWS 整合成單一專案' },
+];
+---
+
+<Layout title={`${meta.title} · ${profile.name}`}>
+  <nav class="nav">
+    <div class="container">
+      <a href="/" class="logo">{profile.name}<span>.dev</span></a>
+      <div class="links">
+        <a href="/#about">關於</a>
+        <a href="/#experience">經歷</a>
+        <a href="/#projects">作品</a>
+        <a href="/#awards">殊榮</a>
+        <a href="/notes/" class="active">筆記</a>
+        <a href="/#contact">聯絡</a>
+      </div>
+    </div>
+  </nav>
+
+  <article class="note">
+    <div class="container">
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+      <p class="note-date">{meta.date}</p>
+      <h1>{meta.title}</h1>
+      <div class="tags">{meta.tags.map((t) => <span>{t}</span>)}</div>
+
+      <div class="prose">
+        <p>
+          從後端工程師轉到 Infra / SRE，今天剛好滿三個月、正式<strong>轉正</strong>。說實話蠻開心的——
+          但開心之餘，更清楚的是<strong>真正的挑戰才剛開始</strong>。後端的世界裡，我交付的是「一個服務」；
+          到了 Infra / SRE，我要對的是「整個團隊賴以運作的地基」，而這塊地基在一個<strong>快速長大的團隊</strong>裡，
+          往往欠了一屁股「治理債」。
+        </p>
+        <p>
+          這篇不是教學，是給三個月後的自己看的一張<strong>作戰地圖</strong>：把眼前最棘手的四件事攤開來，
+          講清楚<strong>為什麼難、該往哪個方向收</strong>。內容已去識別化，重點放在通用的 SRE 思路，不在特定環境細節。
+        </p>
+
+        <div class="obs-steps">
+          {challenges.map((c, i) => (
+            <>
+              <div class="obs-step"><span class="obs-num">{c.no}</span><div><strong>{c.title}</strong><small>{c.sub}</small></div></div>
+              {i < challenges.length - 1 && <span class="obs-step-arrow">→</span>}
+            </>
+          ))}
+        </div>
+
+        <h2>共同的根因：團隊長得太快，治理沒跟上</h2>
+        <p>
+          四個挑戰看似各自獨立，但它們其實是<strong>同一個故事的四個面向</strong>：早期團隊為了「先把東西做出來」，
+          很合理地選擇了「最快能動」的做法——權限開大一點、app 直接塞把 access key、bucket 需要就開、
+          IaC 哪邊缺就補哪邊。這些當下都沒錯，但累積起來，就變成 SRE 進來要還的債。
+        </p>
+        <p class="aside">
+          我提醒自己的第一條原則：<strong>不要用「現在不該這樣」去否定「當初為什麼這樣」</strong>。
+          治理債是成長的副產品，不是誰的錯。SRE 的工作是在<strong>不打斷大家做事</strong>的前提下，把地基慢慢補回來。
+        </p>
+
+        <h2>挑戰一：過鬆的 AWS 帳號權限，要怎麼「收」</h2>
+        <p>
+          團隊以前沒特別設定權限，所以權限很鬆。最直覺的反應是「全部套最小權限（least privilege）」——
+          但真正困難的不是<strong>知道要收</strong>，而是<strong>收的過程不能把人弄到無法工作</strong>。
+          把一個天天在用的權限砍掉，受害的是正在趕進度的同事，而帳就會算到 SRE 頭上。
+        </p>
+        <p>
+          第一步其實不是「設定」，是<strong>盤點每個角色實際會用到什麼</strong>。光我們團隊就分兩大類，需求差很多：
+        </p>
+        <table>
+          <thead><tr><th>角色</th><th>典型用到的服務</th><th>權限樣貌</th></tr></thead>
+          <tbody>
+            <tr><td><strong>算法</strong></td><td>多半就是 EC2（拉機器跑訓練 / 實驗）</td><td>窄、好界定</td></tr>
+            <tr><td><strong>工程</strong></td><td>EC2、RDS、EKS … 範圍很廣</td><td>寬、難一刀切</td></tr>
+          </tbody>
+        </table>
+        <p>
+          所以收斂的方向是<strong>「依角色（persona）切權限邊界」</strong>，而不是給每個人一份客製清單。
+          算法的邊界相對好畫；工程這條因為碰的服務多，得更小心。整個過程我給自己定的節奏是：
+        </p>
+        <div class="flow">
+          <div class="flow-node"><strong>① 觀測，先別動</strong><small>用實際使用紀錄（如 CloudTrail / Access Analyzer）看大家「真的」用了什麼</small></div>
+          <div class="flow-arrow"><span class="flow-label">用數據取代猜測</span></div>
+          <div class="flow-node flow-accent"><strong>② 依 persona 設計權限組</strong><small>算法一組、工程一組，先求「夠用」再求「最小」</small></div>
+          <div class="flow-arrow"><span class="flow-label">先寬後窄，分批限縮</span></div>
+          <div class="flow-node flow-store"><strong>③ 漸進式限縮 + 留逃生門</strong><small>一次收一點、給申請管道，避免一刀切擋死生產力</small></div>
+        </div>
+        <p>
+          關鍵字是<strong>「適度地、慢慢地」</strong>。最小權限不是一次到位的開關，是一條要持續往內收的線；
+          收太慢沒效果，收太快會擋住所有人。對我來說，這條線怎麼抓力道，是最難的部分。
+        </p>
+
+        <h2>挑戰二：App 的身分混亂——從 IAM User 收斂到 IRSA</h2>
+        <p>
+          現在 app 存取 AWS 資源（例如讀寫 S3 bucket）是透過 <strong>IAM User</strong> ——也就是發一組
+          長期有效的 access key 給應用程式帶著。這在跑 Kubernetes（EKS）的環境裡，其實有<strong>更好的解</strong>：
+          <strong>IRSA（IAM Roles for Service Accounts）</strong>。
+        </p>
+        <p>為什麼 IRSA 是該走的方向？差別在「身分怎麼證明」：</p>
+        <table>
+          <thead><tr><th></th><th>IAM User（現況）</th><th>IRSA（目標）</th></tr></thead>
+          <tbody>
+            <tr><td>憑證形式</td><td>長期 access key</td><td>短期、自動輪替的 token</td></tr>
+            <tr><td>外洩風險</td><td>key 一旦流出，長期有效</td><td>token 短命，過期即失效</td></tr>
+            <tr><td>權限綁定</td><td>綁在「使用者」，容易被共用</td><td>綁在 K8s ServiceAccount，一個 app 一個身分</td></tr>
+            <tr><td>稽核</td><td>難分辨是哪個 app 在動作</td><td>身分清楚、可追溯到 pod</td></tr>
+          </tbody>
+        </table>
+        <p>IRSA 的核心機制，就是讓 Pod 用自己的 ServiceAccount 身分去「換」一個臨時的 IAM Role 憑證：</p>
+        <div class="flow">
+          <div class="flow-node"><strong>Pod / ServiceAccount</strong><small>K8s 簽發的身分 token（OIDC）</small></div>
+          <div class="flow-arrow"><span class="flow-label">拿 token 去交換</span></div>
+          <div class="flow-node flow-accent"><strong>AWS STS</strong><small>驗證 OIDC → 簽發短期憑證</small></div>
+          <div class="flow-arrow"><span class="flow-label">AssumeRole</span></div>
+          <div class="flow-node flow-store"><strong>IAM Role（綁定 S3 等權限）</strong><small>Pod 以此身分存取資源，無需任何長期 key</small></div>
+        </div>
+        <p>
+          搬遷的挑戰不在技術本身，而在<strong>盤出「哪些 app、用哪把 key、碰哪些資源」</strong>，
+          再一個一個換成對應的 ServiceAccount + Role，且過程中不能讓服務斷線。
+          這跟挑戰一是同一件事——<strong>身分與權限的收斂</strong>，只是這次對象是「機器」而不是「人」。
+        </p>
+
+        <h2>挑戰三：超混亂的 S3——萬年不動的資源怎麼盤</h2>
+        <p>
+          以前沒特別管，所以 bucket 隨手就開，久了就一堆來路不明、放著萬年不動的資源。
+          這種「亂」最麻煩的地方是：<strong>你不敢刪</strong>。因為不知道哪個 bucket 其實還有某個排程半夜在讀，
+          一刪就炸。所以盤查 S3 的重點不是「清掉」，而是先<strong>「看得懂」</strong>。
+        </p>
+        <p>我給自己的盤查順序：</p>
+        <ul>
+          <li><strong>先讓資源「有主」</strong>：用 provider 的 default tags 統一打上 owner / cost / 用途標籤，
+            讓每個 bucket 至少能對應到一個負責的人或服務。沒有標籤的，就是第一批要查清楚的對象。</li>
+          <li><strong>再看「還活著嗎」</strong>：用存取紀錄、最後修改時間、用量趨勢，分出「天天在用 / 偶爾用 / 完全沒動靜」。</li>
+          <li><strong>最後才談「怎麼處置」</strong>：活的就上生命週期規則（lifecycle / 轉冷儲存）省成本；
+            死的先標記、公告、觀察一段時間，確認沒人哭再下架。</li>
+        </ul>
+        <p class="aside">
+          這件事跟我先前做的<strong>集中式 Terragrunt + Lambda 定期盤點</strong>是同一條線：
+          先讓所有資源「被看見、被標記」，治理才有立足點。盤查不是一次性大掃除，是要變成<strong>持續會跑的機制</strong>。
+        </p>
+
+        <h2>挑戰四：Terragrunt scope 不完整——把分裂的 IaC 整合起來</h2>
+        <p>
+          理想上，<strong>一個 Terragrunt 專案</strong>就該把基礎設施收得起來。但現況很妙：
+          <strong>GCP 一個、AWS 又是一個</strong>，兩套各自為政。這帶來的問題是：
+        </p>
+        <ul>
+          <li><strong>心智分裂</strong>：同一個團隊的基礎設施，要在兩個 repo / 兩套慣例之間切換。</li>
+          <li><strong>標準難統一</strong>：命名、tagging、module 重用、遠端 state 的管理方式容易飄移。</li>
+          <li><strong>跨雲關係看不清</strong>：當一個服務同時牽涉兩朵雲時，沒有單一視角能看到全貌。</li>
+        </ul>
+        <p>
+          所以我想把它整合成<strong>單一 Terragrunt 專案</strong>，用 Terragrunt 的階層結構同時納管多雲：
+        </p>
+        <div class="flow">
+          <div class="flow-node flow-accent"><strong>單一 infra 專案（root）</strong><small>共用慣例：命名、tag、remote state、module 來源</small></div>
+          <div class="flow-branch">
+            <div class="flow-col"><span class="flow-path">cloud = aws</span><div class="flow-node flow-store"><strong>aws/ …</strong><small>EKS、RDS、S3 …</small></div></div>
+            <div class="flow-col"><span class="flow-path">cloud = gcp</span><div class="flow-node flow-store"><strong>gcp/ …</strong><small>GCP 對應資源</small></div></div>
+          </div>
+          <div class="flow-arrow"><span class="flow-label">一套指令、一致慣例，跨雲一眼看完</span></div>
+        </div>
+        <p>
+          這是個<strong>大工程</strong>——要對齊兩套既有環境、處理 state 搬遷、收斂重複的設定，
+          而且過程中現有資源不能被誤動。但整合完之後，前面三個挑戰（權限、IRSA、S3 治理）
+          才有一個<strong>統一的地方</strong>用程式碼去落地與維持，而不是手動到各個 console 點。
+        </p>
+
+        <h2>小結：SRE 的工作，是替成長補課</h2>
+        <p>
+          回頭看這四個挑戰，它們其實指向同一個主題：<strong>把「先求有」留下的隱性債，慢慢轉成「可治理、可追溯、可演進」的明確結構。</strong>
+          權限要收、身分要收、資源要盤、IaC 要整合——每一件單獨看都不難，難在<strong>「邊做邊收、不打斷生產力」</strong>，
+          以及要有耐心接受它們都不是一次性的任務，而是要長期維持的機制。
+        </p>
+        <p>
+          轉正只是個起點。接下來三個月，我想把這張地圖一格一格走過去——先從<strong>盤點與標記</strong>這種「先看得見」的事做起，
+          再談限縮與遷移。畢竟在動地基之前，得先確定自己看得懂這塊地基長什麼樣。
+        </p>
+      </div>
+
+      <a class="back-link" href="/notes/">← 回筆記列表</a>
+    </div>
+  </article>
+
+  <footer>
+    <div class="container">
+      © 2026 {profile.name}. Built with Astro · 部署於 GitHub Pages
+    </div>
+  </footer>
+</Layout>

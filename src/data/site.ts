@@ -115,6 +115,14 @@ export const skills = [
 // =====================================================================
 export const notes = [
   {
+    slug: 'sre-probation-four-challenges',
+    title: '轉正為 Infra / SRE 工程師：三個月心得與接下來的四大挑戰',
+    date: '2026-06-26',
+    summary:
+      '從後端工程師轉到 Infra / SRE 滿三個月、正式轉正的一篇反思。記錄一個快速成長的團隊在「治理」上欠的四筆債：過鬆的 AWS 帳號權限要如何漸進式限縮、app 存取從 IAM User 收斂到 IRSA、長年沒人管的 S3 bucket 盤查、以及 GCP / AWS 各自為政的 Terragrunt 想整合成單一專案。著重「為什麼難、該往哪個方向收」，而非單一指令。',
+    tags: ['SRE', 'AWS', 'IAM', 'IRSA', 'S3', 'Terragrunt', 'Governance'],
+  },
+  {
     slug: 'opentelemetry-three-pillars-grafana',
     title: '導入 OpenTelemetry：可觀測性三大支柱與 Grafana 的關係（概念篇）',
     date: '2026-04-24',
